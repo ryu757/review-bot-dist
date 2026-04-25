@@ -113,13 +113,17 @@ def _download_and_apply() -> None:
             z.extractall(tmp_path)
 
         extracted_root = next(tmp_path.glob(f"{GITHUB_REPO}-*"))
-        # GitHub zip 内構造: {repo-branch}/システム（触らないでください）/...
-        # 配布物の構成と一致するよう、システム配下のファイルだけ上書き
+        # GitHub zip 内構造:
+        #   {repo-branch}/                     ← top-level: README, launchers
+        #   {repo-branch}/システム（触らない…）/  ← system: .py 等
+        # 両方とも上書きする（クライアント固有ファイルは PROTECTED で除外）
         source_system = _find_system_dir(extracted_root)
         if source_system:
             _overlay(source_system, PROJECT_DIR)
+            # top-level: README、launcher など。 PROJECT_DIR.parent が解凍トップ
+            _overlay_top_level(extracted_root, PROJECT_DIR.parent)
         else:
-            # システムフォルダが無い場合、ルート直下のファイルを上書き
+            # 念のため: zip 内にシステム配下が無い場合は全部システムに置く
             _overlay(extracted_root, PROJECT_DIR)
 
     # requirements.txt が変わっていれば pip install
@@ -162,6 +166,24 @@ def _overlay(source: Path, dest: Path) -> None:
                 shutil.copy2(item, target)
             except Exception:
                 pass
+
+
+def _overlay_top_level(source: Path, dest: Path) -> None:
+    """top-level の README やランチャーを上書き。サブフォルダ（システム）は別関数で処理済みなのでスキップ。
+    .command / .sh は実行権限を付け直す（zip 配信で消える環境への対策）。
+    """
+    for item in source.iterdir():
+        if item.name in PROTECTED_NAMES:
+            continue
+        if item.is_dir():
+            continue  # サブフォルダは _overlay 経由
+        target = dest / item.name
+        try:
+            shutil.copy2(item, target)
+            if item.suffix in (".command", ".sh"):
+                os.chmod(target, 0o755)
+        except Exception:
+            pass
 
 
 def _venv_python_path() -> Path:
