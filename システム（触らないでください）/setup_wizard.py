@@ -82,13 +82,14 @@ def _venv_python() -> Path:
 def _in_target_venv() -> bool:
     """現在の Python がプロジェクトの venv 内かを判定。
 
-    venv の中で動いている Python は sys.prefix が venv ディレクトリを指す。
-    Path(sys.executable) での比較は symlink で誤判定するので避ける。
+    Japanese パスの Unicode 正規化（NFC vs NFD）の差で文字列比較が失敗するケースがあるため、
+    inode 比較の os.path.samefile を使う。
     """
     try:
-        in_some_venv = sys.prefix != sys.base_prefix
-        return in_some_venv and Path(sys.prefix).resolve() == VENV_DIR.resolve()
-    except Exception:
+        if sys.prefix == sys.base_prefix:
+            return False
+        return os.path.samefile(sys.prefix, str(VENV_DIR))
+    except (OSError, FileNotFoundError):
         return False
 
 
@@ -417,7 +418,9 @@ def main() -> None:
     print("    ③ Google ビジネスプロフィールにログイン（ブラウザで）")
 
     # ステップ 0: venv とライブラリ
-    if not _in_target_venv():
+    # （無限ループ防止: 既に bootstrap 済みなら環境変数で2度目をスキップ）
+    bootstrapped = os.getenv("WIZARD_BOOTSTRAPPED") == "1"
+    if not _in_target_venv() and not bootstrapped:
         _step(0, 8, "仮想環境と依存ライブラリの準備")
         _bootstrap_venv()
 
@@ -425,7 +428,8 @@ def main() -> None:
         print()
         print("  仮想環境内でウィザードを再起動します...")
         time.sleep(1)
-        rc = subprocess.run([py, str(Path(__file__).resolve())]).returncode
+        env = {**os.environ, "WIZARD_BOOTSTRAPPED": "1"}
+        rc = subprocess.run([py, str(Path(__file__).resolve())], env=env).returncode
         sys.exit(rc)
 
     # venv 内で起動後、GitHub 上の最新版を自動取得
