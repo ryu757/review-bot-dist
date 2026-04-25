@@ -140,30 +140,18 @@ def ensure_sheet_ready():
             },
         ).execute()
 
-    # 設定シートの初期化／マイグレーション
+    # 設定シートの初期化（既存値があれば一切上書き・追加しない）
     existing = _get_sheets_service().spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         range=f"'{CONFIG_SHEET_NAME}'!A1:B20",
     ).execute().get("values", [])
     if not existing:
-        # 新規作成: ヘッダー + デフォルト全行を書き込み
         _get_sheets_service().spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
             range=f"'{CONFIG_SHEET_NAME}'!A1:B{1 + len(DEFAULT_CONFIG_ROWS)}",
             valueInputOption="USER_ENTERED",
             body={"values": [CONFIG_HEADERS] + DEFAULT_CONFIG_ROWS},
         ).execute()
-    else:
-        # 既存シート: 不足している項目を末尾に追加（既存値は保護）
-        existing_keys = {row[0].strip() for row in existing[1:] if row and row[0]}
-        missing_rows = [r for r in DEFAULT_CONFIG_ROWS if r[0] not in existing_keys]
-        if missing_rows:
-            _get_sheets_service().spreadsheets().values().append(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"'{CONFIG_SHEET_NAME}'!A:B",
-                valueInputOption="USER_ENTERED",
-                body={"values": missing_rows},
-            ).execute()
 
 
 def get_business_config() -> dict:

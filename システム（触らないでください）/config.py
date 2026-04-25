@@ -44,12 +44,13 @@ CONFIG_KEY_WEBSITE_URL = "ホームページURL"
 CONFIG_KEY_PRIORITY_KEYWORDS = "重点キーワード"
 CONFIG_KEY_ANTHROPIC_KEY = "Anthropic APIキー"
 
+# デフォルトで表示する項目は最小限。
+# CONFIG_KEY_REGION / CONFIG_KEY_PRIORITY_KEYWORDS は任意項目で、
+# クライアントが望む場合は「設定」シートに自分で行を追加すれば自動的に反映される。
 DEFAULT_CONFIG_ROWS = [
     [CONFIG_KEY_BUSINESS_NAME, ""],
     [CONFIG_KEY_INDUSTRY, ""],
-    [CONFIG_KEY_REGION, ""],            # 例: 横浜市鶴見区
     [CONFIG_KEY_WEBSITE_URL, ""],
-    [CONFIG_KEY_PRIORITY_KEYWORDS, ""], # 例: 車検 / 板金 / 輸入車対応（カンマ or スラッシュ区切り）
     [CONFIG_KEY_ANTHROPIC_KEY, ""],
 ]
 
