@@ -39,13 +39,17 @@ SHEET_HEADERS = [
 CONFIG_HEADERS = ["項目", "値"]
 CONFIG_KEY_BUSINESS_NAME = "企業名"
 CONFIG_KEY_INDUSTRY = "業界"
+CONFIG_KEY_REGION = "地域"
 CONFIG_KEY_WEBSITE_URL = "ホームページURL"
+CONFIG_KEY_PRIORITY_KEYWORDS = "重点キーワード"
 CONFIG_KEY_ANTHROPIC_KEY = "Anthropic APIキー"
 
 DEFAULT_CONFIG_ROWS = [
     [CONFIG_KEY_BUSINESS_NAME, ""],
     [CONFIG_KEY_INDUSTRY, ""],
+    [CONFIG_KEY_REGION, ""],            # 例: 横浜市鶴見区
     [CONFIG_KEY_WEBSITE_URL, ""],
+    [CONFIG_KEY_PRIORITY_KEYWORDS, ""], # 例: 車検 / 板金 / 輸入車対応（カンマ or スラッシュ区切り）
     [CONFIG_KEY_ANTHROPIC_KEY, ""],
 ]
 

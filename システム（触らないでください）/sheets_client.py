@@ -140,18 +140,30 @@ def ensure_sheet_ready():
             },
         ).execute()
 
-    # 設定シートの初期化（既存値があれば上書きしない）
+    # 設定シートの初期化／マイグレーション
     existing = _get_sheets_service().spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"'{CONFIG_SHEET_NAME}'!A1:B10",
+        range=f"'{CONFIG_SHEET_NAME}'!A1:B20",
     ).execute().get("values", [])
     if not existing:
+        # 新規作成: ヘッダー + デフォルト全行を書き込み
         _get_sheets_service().spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
             range=f"'{CONFIG_SHEET_NAME}'!A1:B{1 + len(DEFAULT_CONFIG_ROWS)}",
             valueInputOption="USER_ENTERED",
             body={"values": [CONFIG_HEADERS] + DEFAULT_CONFIG_ROWS},
         ).execute()
+    else:
+        # 既存シート: 不足している項目を末尾に追加（既存値は保護）
+        existing_keys = {row[0].strip() for row in existing[1:] if row and row[0]}
+        missing_rows = [r for r in DEFAULT_CONFIG_ROWS if r[0] not in existing_keys]
+        if missing_rows:
+            _get_sheets_service().spreadsheets().values().append(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"'{CONFIG_SHEET_NAME}'!A:B",
+                valueInputOption="USER_ENTERED",
+                body={"values": missing_rows},
+            ).execute()
 
 
 def get_business_config() -> dict:
@@ -316,6 +328,40 @@ def update_review_date(row_index_1based: int, review_date: str) -> None:
         valueInputOption="USER_ENTERED",
         body={"values": [[review_date]]},
     ).execute()
+
+
+def get_recent_posted_replies(limit: int = 5) -> list[dict]:
+    """最近 N 件の「投稿済み」行を返す。Few-shot 例として AI に渡す用。
+
+    返り値: [{"review_body", "reply", "rating"}, ...]（古い順 → 新しい順）
+    """
+    rows = get_all_rows()
+    if not rows:
+        return []
+    header = rows[0]
+    try:
+        idx_status = header.index(COL_STATUS)
+        idx_body = header.index(COL_REVIEW_BODY)
+        idx_draft = header.index(COL_DRAFT_REPLY)
+        idx_rating = header.index(COL_RATING)
+    except ValueError:
+        return []
+
+    posted = []
+    for row in rows[1:]:
+        if len(row) <= max(idx_status, idx_draft, idx_body, idx_rating):
+            continue
+        if (row[idx_status] or "").strip() != STATUS_POSTED:
+            continue
+        body = (row[idx_body] or "").strip()
+        reply = (row[idx_draft] or "").strip()
+        if body and reply:
+            posted.append({
+                "review_body": body,
+                "reply": reply,
+                "rating": (row[idx_rating] or "").strip(),
+            })
+    return posted[-limit:]
 
 
 def get_existing_review_names() -> set[str]:

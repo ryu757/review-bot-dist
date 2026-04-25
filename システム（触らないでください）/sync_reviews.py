@@ -7,7 +7,9 @@ from config import (
     STATUS_DRAFT,
     CONFIG_KEY_BUSINESS_NAME,
     CONFIG_KEY_INDUSTRY,
+    CONFIG_KEY_REGION,
     CONFIG_KEY_WEBSITE_URL,
+    CONFIG_KEY_PRIORITY_KEYWORDS,
     COL_REVIEW_DATE,
     COL_REVIEWER,
 )
@@ -18,9 +20,11 @@ from sheets_client import (
     append_draft_row,
     get_existing_review_names,
     get_business_config,
+    get_recent_posted_replies,
     get_all_rows,
     update_review_date,
 )
+from seo_keywords import extract_seo_keywords
 
 
 def sync_new_reviews_to_sheet() -> int:
@@ -40,11 +44,22 @@ def sync_new_reviews_to_sheet() -> int:
     config = get_business_config()
     business_name = config.get(CONFIG_KEY_BUSINESS_NAME, "")
     industry = config.get(CONFIG_KEY_INDUSTRY, "")
+    region = config.get(CONFIG_KEY_REGION, "")
     website_url = config.get(CONFIG_KEY_WEBSITE_URL, "")
+    priority_keywords = config.get(CONFIG_KEY_PRIORITY_KEYWORDS, "")
 
     if not business_name or not industry:
         print("⚠ スプレッドシートの「設定」シートに 企業名 / 業界 を記入してください。")
         print("  記入が無いと一般的な返信文しか生成できません。")
+
+    # SEO サジェスト取得（1 回・キャッシュ有り）と過去返信例（Few-shot）を sync 全体で使い回す
+    print("  SEO 関連語を取得中（Google サジェスト・キャッシュ24h）...")
+    seo_suggestions = extract_seo_keywords(business_name, industry, region)
+    if seo_suggestions:
+        print(f"    取得語: {', '.join(seo_suggestions[:8])}")
+    past_replies = get_recent_posted_replies(limit=5)
+    if past_replies:
+        print(f"  過去の投稿済み返信 {len(past_replies)} 件をトーン参考として使用")
 
     added = 0
     skipped_existing = 0
@@ -64,7 +79,13 @@ def sync_new_reviews_to_sheet() -> int:
         body = review.get("body") or ""
 
         print(f"  下書き生成中: {reviewer} (★{rating})...")
-        draft = generate_draft(reviewer, rating, body, business_name, industry, website_url)
+        draft = generate_draft(
+            reviewer, rating, body, business_name, industry, website_url,
+            region=region,
+            priority_keywords=priority_keywords,
+            seo_suggestions=seo_suggestions,
+            past_replies=past_replies,
+        )
 
         review_date = review.get("review_date") or datetime.now().strftime("%Y-%m-%d %H:%M")
         row = [
