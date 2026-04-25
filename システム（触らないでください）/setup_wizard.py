@@ -1,0 +1,489 @@
+"""対話式セットアップウィザード（配布版・3アクション体験）
+
+クライアントが行う実質的な操作は：
+  1. setup.command をダブルクリック
+  2. 自動で開かれるスプレッドシートに 4 項目を入力
+  3. Google ビジネスプロフィールにログイン
+
+それ以外はウィザードが極力自動でやる：
+- 仮想環境構築・依存インストール
+- ~/Downloads から OAuth JSON を自動検出
+- スプレッドシートを自動作成（必要に応じて）
+- 設定シートを自動作成して入力欄を準備
+- ホームページ取得テスト
+- 自動実行登録
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import time
+import webbrowser
+from pathlib import Path
+
+PROJECT_DIR = Path(__file__).resolve().parent
+VENV_DIR = PROJECT_DIR / ".venv"
+ENV_FILE = PROJECT_DIR / ".env"
+CREDENTIALS_DIR = PROJECT_DIR / "credentials"
+OAUTH_CLIENT_FILE = CREDENTIALS_DIR / "oauth_credentials.json"
+OAUTH_TOKEN_SHEETS = CREDENTIALS_DIR / "oauth_token_sheets.json"
+SESSION_DIR = PROJECT_DIR / "google_session"
+
+
+# ------------------------------------------------------------------
+# 表示ヘルパー
+# ------------------------------------------------------------------
+
+def _line(char: str = "─") -> None:
+    print(char * 60)
+
+
+def _step(num: int, total: int, title: str) -> None:
+    print()
+    _line("═")
+    print(f"  ステップ {num}/{total}  {title}")
+    _line("═")
+
+
+def _ask(prompt: str, default: str = "") -> str:
+    suffix = f" [{default}]" if default else ""
+    val = input(f"  {prompt}{suffix}: ").strip()
+    return val or default
+
+
+def _yesno(prompt: str, default: bool = False) -> bool:
+    d = "Y/n" if default else "y/N"
+    val = input(f"  {prompt} [{d}]: ").strip().lower()
+    if not val:
+        return default
+    return val in ("y", "yes")
+
+
+def _open_url(url: str) -> None:
+    print(f"  ブラウザで開きます: {url}")
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
+# ------------------------------------------------------------------
+# venv ブートストラップ
+# ------------------------------------------------------------------
+
+def _venv_python() -> Path:
+    if sys.platform == "win32":
+        return VENV_DIR / "Scripts" / "python.exe"
+    return VENV_DIR / "bin" / "python"
+
+
+def _in_target_venv() -> bool:
+    """現在の Python がプロジェクトの venv 内かを判定。
+
+    venv の中で動いている Python は sys.prefix が venv ディレクトリを指す。
+    Path(sys.executable) での比較は symlink で誤判定するので避ける。
+    """
+    try:
+        in_some_venv = sys.prefix != sys.base_prefix
+        return in_some_venv and Path(sys.prefix).resolve() == VENV_DIR.resolve()
+    except Exception:
+        return False
+
+
+def _bootstrap_venv() -> None:
+    if not VENV_DIR.exists():
+        print("  仮想環境を作成中...")
+        subprocess.run([sys.executable, "-m", "venv", str(VENV_DIR)], check=True)
+
+    py = str(_venv_python())
+    print("  pip を更新中...")
+    subprocess.run([py, "-m", "pip", "install", "--upgrade", "pip", "-q"], check=True)
+
+    print("  依存ライブラリをインストール中...（数分かかることがあります）")
+    subprocess.run(
+        [py, "-m", "pip", "install", "-r", str(PROJECT_DIR / "requirements.txt"), "-q"],
+        check=True,
+    )
+
+    print("  ブラウザコンポーネント (Chromium) をインストール中...（数分かかることがあります）")
+    subprocess.run([py, "-m", "playwright", "install", "chromium"], check=True)
+
+
+# ------------------------------------------------------------------
+# .env 操作
+# ------------------------------------------------------------------
+
+def _read_env() -> dict:
+    out = {}
+    if ENV_FILE.exists():
+        for line in ENV_FILE.read_text().splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip()
+    return out
+
+
+def _write_env(values: dict) -> None:
+    ENV_FILE.write_text("".join(f"{k}={v}\n" for k, v in values.items()))
+
+
+# ------------------------------------------------------------------
+# 各ステップ
+# ------------------------------------------------------------------
+
+def _step_oauth_client() -> None:
+    """OAuth クライアント JSON の準備。~/Downloads から自動検出を試みる。"""
+    CREDENTIALS_DIR.mkdir(exist_ok=True)
+    if OAUTH_CLIENT_FILE.exists():
+        if _yesno("既存の OAuth クライアントを使い続けますか？", True):
+            print("  既存のものを使用します")
+            return
+        OAUTH_CLIENT_FILE.unlink()
+
+    # ~/Downloads から自動検出
+    downloads = Path.home() / "Downloads"
+    candidates = sorted(
+        downloads.glob("client_secret_*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    if candidates:
+        latest = candidates[0]
+        print()
+        print(f"  ダウンロードフォルダで OAuth クライアント JSON を見つけました:")
+        print(f"    {latest.name}")
+        if _yesno("  これを使いますか？", True):
+            shutil.copy(latest, OAUTH_CLIENT_FILE)
+            print(f"  ✓ コピーしました")
+            return
+
+    # 自動検出に失敗 or ユーザーが拒否
+    print()
+    print("  Google Cloud で OAuth クライアントをまだ作成していない場合は、以下の手順で作成してください。")
+    print("  （README をご参照ください）")
+    print()
+    print("  1) https://console.cloud.google.com/projectcreate でプロジェクト作成")
+    print("  2) 「Google Sheets API」を有効化")
+    print("  3) 「OAuth 同意画面」を構成（外部・自分のメールをテストユーザーに追加）")
+    print("  4) 「認証情報」→「OAuth クライアント ID」→ アプリの種類「デスクトップ」")
+    print("  5) JSON をダウンロード（ファイル名: client_secret_xxx.json）")
+    print()
+    if _yesno("  Google Cloud Console をブラウザで開きますか？", True):
+        _open_url("https://console.cloud.google.com/projectcreate")
+    print()
+    print(f"  ダウンロード後に ENTER を押すと、ダウンロードフォルダから自動検出します。")
+
+    while True:
+        input("  ENTER を押してください...")
+        candidates = sorted(
+            downloads.glob("client_secret_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            latest = candidates[0]
+            shutil.copy(latest, OAUTH_CLIENT_FILE)
+            print(f"  ✓ {latest.name} を使用します")
+            return
+        print(f"  × ダウンロードフォルダに client_secret_*.json が見つかりません")
+        if not _yesno("  もう一度確認しますか？", True):
+            raise SystemExit("OAuth クライアント JSON が必要です。中断します。")
+
+
+def _step_oauth_consent() -> None:
+    if OAUTH_TOKEN_SHEETS.exists():
+        if _yesno("既存の Google アカウント認可を使い続けますか？", True):
+            print("  既存の認可を使用します")
+            return
+        OAUTH_TOKEN_SHEETS.unlink()
+
+    print()
+    print("  ブラウザを開いて Google アカウントでスプレッドシートへのアクセスを許可してください。")
+    input("  ENTER を押すと開きます...")
+
+    sys.path.insert(0, str(PROJECT_DIR))
+    from auth import get_credentials  # type: ignore
+
+    get_credentials()
+    print("  ✓ 認可完了")
+
+
+def _reload_config_modules() -> None:
+    """SPREADSHEET_ID 変更後、config と sheets_client をリロードして反映させる。"""
+    import importlib
+    try:
+        import config  # type: ignore
+        importlib.reload(config)
+    except Exception:
+        pass
+    try:
+        import sheets_client  # type: ignore
+        importlib.reload(sheets_client)
+    except Exception:
+        pass
+
+
+def _step_spreadsheet_setup() -> None:
+    """スプレッドシートの作成 or 既存指定。"""
+    sys.path.insert(0, str(PROJECT_DIR))
+    from sheets_client import create_new_spreadsheet  # type: ignore
+
+    env = _read_env()
+    if env.get("SPREADSHEET_ID"):
+        if _yesno(
+            f"既存スプレッドシート ({env['SPREADSHEET_ID'][:20]}...) を使い続けますか？",
+            True,
+        ):
+            print("  既存スプレッドシートを使用します")
+            os.environ["SPREADSHEET_ID"] = env["SPREADSHEET_ID"]
+            _reload_config_modules()
+            return
+
+    print()
+    if _yesno("新規スプレッドシートを自動作成しますか？", True):
+        print("  作成中...")
+        spreadsheet_id, url = create_new_spreadsheet()
+        env["SPREADSHEET_ID"] = spreadsheet_id
+        _write_env(env)
+        print(f"  ✓ 作成しました")
+        print(f"    URL: {url}")
+        print("    （あとで Google Drive で好きなフォルダに移動できます）")
+    else:
+        print()
+        print("  既存のスプレッドシート ID を入力してください。")
+        print("  https://docs.google.com/spreadsheets/d/【ここがID】/edit")
+        print()
+        spreadsheet_id = _ask("スプレッドシート ID")
+        if not spreadsheet_id:
+            raise SystemExit("スプレッドシート ID が必要です。中断します。")
+        env["SPREADSHEET_ID"] = spreadsheet_id
+        _write_env(env)
+
+    # .env 書き込み後、後続ステップが参照するモジュール内の SPREADSHEET_ID を即時更新
+    os.environ["SPREADSHEET_ID"] = spreadsheet_id
+    _reload_config_modules()
+
+
+def _step_init_sheets() -> None:
+    """スプレッドシートに 2 タブとヘッダーを作成。"""
+    sys.path.insert(0, str(PROJECT_DIR))
+    from sheets_client import ensure_sheet_ready  # type: ignore
+
+    print()
+    print("  スプレッドシートを初期化します（『レビュー返信』『設定』タブを作成）...")
+    ensure_sheet_ready()
+    print("  ✓ 初期化完了")
+
+
+def _step_fill_config_in_sheet() -> None:
+    """ユーザーに設定シートを開いてもらい、4 項目を入力してもらう。"""
+    sys.path.insert(0, str(PROJECT_DIR))
+    from sheets_client import get_business_config, get_config_sheet_url  # type: ignore
+    from config import (  # type: ignore
+        CONFIG_KEY_BUSINESS_NAME,
+        CONFIG_KEY_INDUSTRY,
+        CONFIG_KEY_WEBSITE_URL,
+        CONFIG_KEY_ANTHROPIC_KEY,
+        REQUIRED_CONFIG_KEYS,
+    )
+
+    url = get_config_sheet_url()
+    print()
+    print("  スプレッドシートの『設定』タブを開きます。以下の 4 項目を入力してください:")
+    print()
+    print(f"    • {CONFIG_KEY_BUSINESS_NAME}")
+    print(f"    • {CONFIG_KEY_INDUSTRY}")
+    print(f"    • {CONFIG_KEY_WEBSITE_URL}（無い場合は空欄でも可）")
+    print(f"    • {CONFIG_KEY_ANTHROPIC_KEY}（sk-ant-... で始まる文字列）")
+    print()
+    print("  Anthropic APIキーがまだ無い場合は以下から取得:")
+    print("    https://console.anthropic.com/settings/keys")
+    print()
+    if _yesno("  スプレッドシートを開きますか？", True):
+        _open_url(url)
+    print()
+
+    while True:
+        input("  入力が完了したら ENTER を押してください...")
+        # キャッシュクリアして最新値取得
+        import sheets_client  # type: ignore
+        sheets_client._CACHED_CONFIG = None
+        config = get_business_config()
+
+        missing = [k for k in REQUIRED_CONFIG_KEYS if not config.get(k)]
+        api_key = config.get(CONFIG_KEY_ANTHROPIC_KEY, "")
+        invalid_key = api_key and not api_key.startswith("sk-ant-")
+
+        if not missing and not invalid_key:
+            break
+
+        if missing:
+            print(f"  ⚠ 未入力の項目があります: {', '.join(missing)}")
+        if invalid_key:
+            print(f"  ⚠ Anthropic APIキーは『sk-ant-』で始まる必要があります")
+        print(f"  もう一度スプレッドシートで入力してから ENTER を押してください。")
+        print(f"  シート URL: {url}")
+
+    # API キーを .env にコピー（runtime で anthropic.Anthropic() が読む）
+    env = _read_env()
+    env["ANTHROPIC_API_KEY"] = api_key
+    _write_env(env)
+    print("  ✓ 設定値を読み取りました")
+
+    # ホームページ取得テスト
+    website_url = config.get(CONFIG_KEY_WEBSITE_URL, "")
+    if website_url:
+        print()
+        print("  ホームページ情報を取得します...")
+        from website_fetcher import fetch_website_text  # type: ignore
+        text = fetch_website_text(website_url, force=True)
+        if text:
+            print(f"  ✓ {len(text)} 文字の情報を取得・キャッシュしました")
+        else:
+            print("  ⚠ ホームページから情報を取得できませんでした")
+            print("    URL が正しいか、サイトがアクセス可能かをご確認ください")
+
+
+def _step_business_login() -> None:
+    if SESSION_DIR.exists() and (SESSION_DIR / "state.json").exists():
+        if _yesno("既存の Google ビジネスプロフィールのログインセッションを使い続けますか？", True):
+            print("  既存のセッションを使用します")
+            return
+        shutil.rmtree(SESSION_DIR, ignore_errors=True)
+
+    print()
+    print("  ブラウザを開きます。Google ビジネスプロフィールにログインしてください。")
+    print("  ログイン完了後、ブラウザを閉じれば OK です。")
+    print("  （5分待つと自動でブラウザが閉じます）")
+    input("  ENTER を押すと開きます...")
+
+    sys.path.insert(0, str(PROJECT_DIR))
+    os.environ["BROWSER_HEADLESS"] = "0"
+    from browser_client import login_interactive  # type: ignore
+
+    login_interactive()
+    print("  ✓ ログインセッションを保存しました")
+
+
+def _step_schedule() -> None:
+    if not _yesno("自動実行を登録しますか？（30分ごとに新着取得・10分ごとに投稿）", True):
+        print("  スキップしました（後で `python scheduler.py install` で登録できます）")
+        return
+
+    sys.path.insert(0, str(PROJECT_DIR))
+    from scheduler import install  # type: ignore
+    install()
+
+
+def _step_initial_run() -> None:
+    """セットアップ完了直後に最初の sync を実行して動作確認させる。"""
+    print()
+    print("  最初のレビュー取得を実行して、スプレッドシートに下書きを書き込みます。")
+    print("  （新着レビューが多いと数分かかることがあります）")
+    if not _yesno("今すぐ実行しますか？", True):
+        print("  スキップしました。最初の自動実行は 30 分後です。")
+        return
+
+    py = str(_venv_python())
+    main_py = PROJECT_DIR / "main.py"
+    print()
+    print("  実行中...")
+    rc = subprocess.run([py, str(main_py), "sync"]).returncode
+    if rc == 0:
+        print()
+        print("  ✓ 初回取得が完了しました。スプレッドシートを確認してください。")
+    else:
+        print()
+        print("  ⚠ 取得中にエラーが発生しました。ログを確認してください。")
+        print("  （セッション切れの可能性があります。エラーメッセージを配布元に共有してください）")
+
+
+# ------------------------------------------------------------------
+# main
+# ------------------------------------------------------------------
+
+def main() -> None:
+    print()
+    _line("═")
+    print("  Google レビュー自動返信システム — セットアップウィザード")
+    _line("═")
+    print()
+    print("  クライアントが行う操作は実質 3 つです:")
+    print("    ① OAuth クライアント JSON の準備（自動検出を試みます）")
+    print("    ② スプレッドシートに 4 項目を入力（自動で開かれます）")
+    print("    ③ Google ビジネスプロフィールにログイン（ブラウザで）")
+
+    # ステップ 0: venv とライブラリ
+    if not _in_target_venv():
+        _step(0, 8, "仮想環境と依存ライブラリの準備")
+        _bootstrap_venv()
+
+        py = str(_venv_python())
+        print()
+        print("  仮想環境内でウィザードを再起動します...")
+        time.sleep(1)
+        rc = subprocess.run([py, str(Path(__file__).resolve())]).returncode
+        sys.exit(rc)
+
+    # venv 内で起動後、GitHub 上の最新版を自動取得
+    sys.path.insert(0, str(PROJECT_DIR))
+    try:
+        import auto_update  # type: ignore
+        if auto_update.check_and_update_silent():
+            print("  ウィザードを再起動します...")
+            time.sleep(1)
+            auto_update.restart_self()
+    except ImportError:
+        pass
+
+    _step(1, 8, "OAuth クライアント JSON の準備")
+    _step_oauth_client()
+
+    _step(2, 8, "Google アカウントの認可")
+    _step_oauth_consent()
+
+    _step(3, 8, "スプレッドシート作成")
+    _step_spreadsheet_setup()
+
+    _step(4, 8, "スプレッドシート初期化（タブ作成）")
+    _step_init_sheets()
+
+    _step(5, 8, "事業情報・APIキーをスプレッドシートに入力")
+    _step_fill_config_in_sheet()
+
+    _step(6, 8, "Google ビジネスプロフィールへのログイン")
+    _step_business_login()
+
+    _step(7, 8, "自動実行の登録")
+    _step_schedule()
+
+    _step(8, 8, "初回レビュー取得（動作確認）")
+    _step_initial_run()
+
+    print()
+    _line("═")
+    print("  セットアップ完了！")
+    _line("═")
+    print()
+    print("  運用方法:")
+    print("    ・新着レビューは 30 分ごとに自動でスプレッドシートに追加されます")
+    print("    ・スプレッドシートで「ステータス」を「投稿する」に変更すると、")
+    print("      10 分以内に自動で Google マップに返信が投稿されます")
+    print("    ・企業情報・ホームページURL・APIキーは『設定』タブで変更できます")
+    print()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n  中断しました")
+        sys.exit(130)
+    except Exception as e:
+        print()
+        print(f"  エラー: {e}")
+        print("  README のトラブルシューティングを参照してください。")
+        sys.exit(1)
