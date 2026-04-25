@@ -194,14 +194,18 @@ def set_business_config(business_name: str = "", industry: str = "", website_url
 
 
 def append_draft_row(row: list[Any]) -> None:
-    """1行分のデータをシートの末尾に追加。"""
+    """1行分のデータをシートの末尾に追加。
+
+    insertDataOption は指定しない（=OVERWRITE）。INSERT_ROWS だと既存セルの
+    データ検証（プルダウン）が新行に継承されないため。OVERWRITE なら既存の
+    空セル（検証付き）に書き込むので、ステータス列のプルダウンが維持される。
+    """
     if not SPREADSHEET_ID:
         raise ValueError("環境変数 SPREADSHEET_ID を設定してください。")
     _get_sheets_service().spreadsheets().values().append(
         spreadsheetId=SPREADSHEET_ID,
         range=f"'{SHEET_NAME}'!A:A",
         valueInputOption="RAW",
-        insertDataOption="INSERT_ROWS",
         body={"values": [row]},
     ).execute()
 
