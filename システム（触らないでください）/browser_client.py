@@ -22,6 +22,33 @@ BUSINESS_URL = "https://business.google.com"
 import os
 HEADLESS = os.getenv("BROWSER_HEADLESS", "1") == "1"
 
+# 通知モジュール（任意）
+try:
+    import notify as _notify  # type: ignore
+except ImportError:
+    _notify = None  # type: ignore
+
+# レビューカードを検出するセレクタ候補（上から順に試す）
+REVIEW_CARD_SELECTORS = [
+    "[data-review-id]",
+    "[jscontroller][data-review-id]",
+    "div[role='listitem'][data-review-id]",
+]
+
+# 「次へ」ボタンのセレクタ候補
+NEXT_BUTTON_SELECTORS = [
+    'button[aria-label="次へ"]',
+    'button[aria-label="Next"]',
+    'button[aria-label="次のページ"]',
+    'button[jsname][aria-label*="次"]',
+]
+
+# 「返信」ボタンのテキスト候補（厳密一致）
+REPLY_BUTTON_TEXTS = ["返信", "Reply"]
+
+# 送信ボタンのテキスト候補
+SUBMIT_BUTTON_TEXTS = ["返信を投稿", "送信", "Submit", "Post reply", "Post", "投稿"]
+
 
 def _parse_relative_date(text: str) -> str:
     """「3 日前」「2 週間前」などの相対日時を YYYY-MM-DD に変換。"""
@@ -200,13 +227,32 @@ def _extract_timestamps_from_response(body: str, timestamp_map: dict[str, str]) 
                 timestamp_map[reviewer_name] = dt.strftime("%Y-%m-%d")
 
 
+def _find_review_cards(page: Page) -> list:
+    """複数のセレクタを試してレビューカードを取得する（フォールバック付き）。"""
+    for sel in REVIEW_CARD_SELECTORS:
+        cards = page.locator(sel).all()
+        if cards:
+            return cards
+    return []
+
+
+def _click_next_button(page: Page) -> bool:
+    """複数のセレクタを試して「次へ」ボタンをクリックする。"""
+    for sel in NEXT_BUTTON_SELECTORS:
+        btn = page.locator(sel)
+        if btn.count() and btn.is_enabled():
+            btn.click()
+            return True
+    return False
+
+
 def _parse_review_cards(page: Page, timestamp_map: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """現在のページに表示されているレビューカードをパースする。"""
     if timestamp_map is None:
         timestamp_map = {}
 
     reviews = []
-    cards = page.locator("[data-review-id]").all()
+    cards = _find_review_cards(page)
     for card in cards:
         try:
             review_id = card.get_attribute("data-review-id") or ""
@@ -377,15 +423,9 @@ def fetch_reviews() -> list[dict[str, Any]]:
                 # 新しいレビューが見つからなければ終了
                 break
 
-            # 「次へ」ボタンを探してクリック
-            next_btn = page.locator('button[aria-label="次へ"]')
-            if not next_btn.count() or not next_btn.is_enabled():
-                # 英語版フォールバック
-                next_btn = page.locator('button[aria-label="Next"]')
-                if not next_btn.count() or not next_btn.is_enabled():
-                    break
-
-            next_btn.click()
+            # 「次へ」ボタンをフォールバック付きでクリック
+            if not _click_next_button(page):
+                break
             page.wait_for_timeout(3000)
             _random_wait(page, 1, 2)
             page_num += 1
@@ -428,13 +468,8 @@ def post_reply(review_id: str, reply_text: str) -> bool:
             if t.count():
                 target = t
                 break
-            # 「次へ」ボタンで次ページへ
-            next_btn = page.locator('button[aria-label="次へ"]')
-            if not next_btn.count() or not next_btn.is_enabled():
-                next_btn = page.locator('button[aria-label="Next"]')
-                if not next_btn.count() or not next_btn.is_enabled():
-                    break
-            next_btn.click()
+            if not _click_next_button(page):
+                break
             page.wait_for_timeout(3000)
             _random_wait(page, 1, 2)
 

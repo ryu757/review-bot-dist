@@ -10,6 +10,11 @@ from config import STATUS_POSTED
 from browser_client import post_reply
 from sheets_client import get_rows_to_post, set_row_status_and_updated
 
+try:
+    import notify  # type: ignore
+except ImportError:
+    notify = None  # type: ignore
+
 
 def post_pending_replies() -> tuple[int, int]:
     """
@@ -29,9 +34,24 @@ def post_pending_replies() -> tuple[int, int]:
             else:
                 ng += 1
                 print(f"    → 投稿失敗")
+                if notify:
+                    notify.notify(
+                        "WARN",
+                        "返信投稿失敗 (post)",
+                        "post_reply() が False を返しました。",
+                        review_id=review_id[:50],
+                        row_index=row_index,
+                    )
         except Exception as e:
             print(f"    → エラー: {e}")
             ng += 1
+            if notify:
+                notify.notify_exception(
+                    "返信投稿で例外 (post)",
+                    e,
+                    review_id=review_id[:50],
+                    row_index=row_index,
+                )
         # 連続投稿を避けるため少し待つ
         if to_post.index((row_index, review_id, draft_comment)) < len(to_post) - 1:
             time.sleep(5)
