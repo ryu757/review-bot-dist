@@ -480,30 +480,16 @@ def post_reply(review_id: str, reply_text: str) -> bool:
         # 親要素を取得（返信ボタンは親にある）
         parent = target.locator("..")
 
-        # === 二重投稿防止: 既に返信済みかを複数シグナルで判定 ===
-        # 投稿成功後にステータス更新前にPCがスリープした場合の二重投稿を防ぐ
+        # === 二重投稿防止: 「強い証拠」がある場合だけスキップ ===
+        # ボタンの有無で判定すると Google の UI 文言変更で誤検知するため、
+        # 「オーナー返信」テキストの存在のみを根拠にする（保守的に）
         already_replied = parent.evaluate(
             '''el => {
-                // シグナル1: 厳密一致の「返信」ボタン（編集ボタンを除外）が無い
-                const btns = el.querySelectorAll("button");
-                let hasReplyButton = false;
-                for (const btn of btns) {
-                    const text = (btn.textContent || "").trim();
-                    if (text === "返信" || text === "Reply") {
-                        hasReplyButton = true;
-                        break;
-                    }
-                }
-                if (!hasReplyButton) return true;
-
-                // シグナル2: 「オーナーからの返信」テキストが既に表示されている
                 const fullText = el.textContent || "";
-                if (fullText.includes("オーナーからの返信") ||
-                    fullText.includes("Response from the owner") ||
-                    fullText.includes("Owner replied")) {
-                    return true;
-                }
-                return false;
+                return fullText.includes("オーナーからの返信") ||
+                       fullText.includes("オーナーが返信") ||
+                       fullText.includes("Response from the owner") ||
+                       fullText.includes("Owner replied");
             }'''
         )
         if already_replied:
