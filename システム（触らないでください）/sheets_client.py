@@ -28,6 +28,7 @@ from config import (
     COL_UPDATED,
     STATUS_DRAFT,
     STATUS_TO_POST,
+    STATUS_POSTED,
 )
 
 _CACHED_CONFIG: dict | None = None
