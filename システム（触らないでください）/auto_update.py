@@ -62,12 +62,18 @@ def _fetch(url: str, timeout: int = 15) -> bytes:
 
 
 def get_remote_version() -> str:
-    """GitHub の VERSION ファイルから最新バージョンを取得。"""
+    """GitHub の VERSION ファイルから最新バージョンを取得。
+
+    VERSION は「システム（触らないでください）」フォルダ内に格納されている。
+    日本語フォルダ名は URL エンコードして取得する。
+    """
     if not is_configured():
         return ""
+    import urllib.parse
+    folder = urllib.parse.quote("システム（触らないでください）")
     url = (
         f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/"
-        f"{GITHUB_BRANCH}/VERSION"
+        f"{GITHUB_BRANCH}/{folder}/VERSION"
     )
     try:
         return _fetch(url, timeout=8).decode("utf-8").strip()
