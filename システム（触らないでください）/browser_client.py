@@ -480,21 +480,8 @@ def post_reply(review_id: str, reply_text: str) -> bool:
         # 親要素を取得（返信ボタンは親にある）
         parent = target.locator("..")
 
-        # === 二重投稿防止: 「強い証拠」がある場合だけスキップ ===
-        # ボタンの有無で判定すると Google の UI 文言変更で誤検知するため、
-        # 「オーナー返信」テキストの存在のみを根拠にする（保守的に）
-        already_replied = parent.evaluate(
-            '''el => {
-                const fullText = el.textContent || "";
-                return fullText.includes("オーナーからの返信") ||
-                       fullText.includes("オーナーが返信") ||
-                       fullText.includes("Response from the owner") ||
-                       fullText.includes("Owner replied");
-            }'''
-        )
-        if already_replied:
-            print(f"  ✓ 既に返信済みのためスキップ（重複防止）: {review_id[:30]}")
-            return True  # 成功扱い → シートが「投稿済み」に更新される
+        # 二重投稿防止チェックは撤去（誤検知で投稿が走らない問題があったため）。
+        # 万一の重複は人間が Google マップ側で削除する運用とする。
 
         parent.scroll_into_view_if_needed()
         _random_wait(page)

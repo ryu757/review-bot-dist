@@ -161,21 +161,84 @@ def _step_oauth_client() -> None:
             print(f"  ✓ コピーしました")
             return
 
-    # 自動検出に失敗 or ユーザーが拒否
+    # 自動検出に失敗 or ユーザーが拒否 → ガイド付きで作成
+    _guided_oauth_client_creation(downloads)
+
+
+def _guided_oauth_client_creation(downloads: Path) -> None:
+    """Google Cloud Console で必要なページを順番に自動オープンしながら、
+    OAuth クライアント JSON を作成・取得する対話式フロー。"""
     print()
-    print("  Google Cloud で OAuth クライアントをまだ作成していない場合は、以下の手順で作成してください。")
-    print("  （README をご参照ください）")
+    print("  これから Google Cloud Console で「OAuth クライアント」を作成します。")
+    print("  必要なページを順番に自動で開きますので、画面の指示通りに操作してください。")
+    print("  （Google アカウントへのログインを求められたら自分のアカウントでログインしてください）")
     print()
-    print("  1) https://console.cloud.google.com/projectcreate でプロジェクト作成")
-    print("  2) 「Google Sheets API」を有効化")
-    print("  3) 「OAuth 同意画面」を構成（外部・自分のメールをテストユーザーに追加）")
-    print("  4) 「認証情報」→「OAuth クライアント ID」→ アプリの種類「デスクトップ」")
-    print("  5) JSON をダウンロード（ファイル名: client_secret_xxx.json）")
+    input("  準備ができたら ENTER を押してください...")
+
+    # --- 小ステップ 1/4: プロジェクト作成 ---
     print()
-    if _yesno("  Google Cloud Console をブラウザで開きますか？", True):
-        _open_url("https://console.cloud.google.com/projectcreate")
+    _line("─")
+    print("  小ステップ 1/4  プロジェクトを作成")
+    _line("─")
+    _open_url("https://console.cloud.google.com/projectcreate")
     print()
-    print(f"  ダウンロード後に ENTER を押すと、ダウンロードフォルダから自動検出します。")
+    print("  ▼ 開いたページでやること:")
+    print("    ① 「プロジェクト名」に好きな名前を入力(例: review-bot)")
+    print("    ② 「場所」はそのままで OK")
+    print("    ③ 「作成」ボタンをクリック")
+    print("    ④ 画面右上の通知でプロジェクト作成完了を待つ(数秒〜十数秒)")
+    print()
+    input("  完了したら ENTER を押してください...")
+
+    # --- 小ステップ 2/4: Sheets API 有効化 ---
+    print()
+    _line("─")
+    print("  小ステップ 2/4  Google Sheets API を有効化")
+    _line("─")
+    _open_url("https://console.cloud.google.com/apis/library/sheets.googleapis.com")
+    print()
+    print("  ▼ 開いたページでやること:")
+    print("    ① 画面上部のプロジェクト選択が、さきほど作ったプロジェクトかを確認")
+    print("       (違っていたら上部メニューから切り替え)")
+    print("    ② 青い「有効にする」ボタンをクリック")
+    print("    ③ ダッシュボードに切り替わるまで待つ")
+    print()
+    input("  完了したら ENTER を押してください...")
+
+    # --- 小ステップ 3/4: OAuth 同意画面 ---
+    print()
+    _line("─")
+    print("  小ステップ 3/4  OAuth 同意画面を設定")
+    _line("─")
+    _open_url("https://console.cloud.google.com/apis/credentials/consent")
+    print()
+    print("  ▼ 開いたページでやること:")
+    print("    ① 「User Type」で『外部』を選び「作成」")
+    print("    ② アプリ名: 好きな名前(例: review-bot)")
+    print("    ③ ユーザーサポートメール: 自分の Google メールを選択")
+    print("    ④ デベロッパー連絡先情報: 自分のメールアドレスを入力")
+    print("    ⑤ 「保存して次へ」を3回押して進む(スコープ・テストユーザーは空のまま)")
+    print("    ⑥ 完了後、左メニュー(または「対象」)から「テストユーザー」を開く")
+    print("    ⑦ 「+ ADD USERS」を押して、自分の Google メールを追加 → 保存")
+    print()
+    input("  完了したら ENTER を押してください...")
+
+    # --- 小ステップ 4/4: OAuth クライアント ID 作成 & JSON ダウンロード ---
+    print()
+    _line("─")
+    print("  小ステップ 4/4  OAuth クライアント ID を作成 & JSON ダウンロード")
+    _line("─")
+    _open_url("https://console.cloud.google.com/apis/credentials/oauthclient")
+    print()
+    print("  ▼ 開いたページでやること:")
+    print("    ① 「アプリケーションの種類」→『デスクトップアプリ』を選択")
+    print("    ② 「名前」: 好きな名前(例: review-bot-desktop)")
+    print("    ③ 「作成」ボタンをクリック")
+    print("    ④ ポップアップで『JSON をダウンロード』ボタンをクリック")
+    print("       (ダウンロードフォルダに client_secret_xxx.json が保存される)")
+    print()
+    print("  JSON のダウンロードが終わったら、ENTER を押してください。")
+    print("  自動でダウンロードフォルダから検出します。")
 
     while True:
         input("  ENTER を押してください...")
@@ -187,7 +250,7 @@ def _step_oauth_client() -> None:
         if candidates:
             latest = candidates[0]
             shutil.copy(latest, OAUTH_CLIENT_FILE)
-            print(f"  ✓ {latest.name} を使用します")
+            print(f"  ✓ {latest.name} を取り込みました")
             return
         print(f"  × ダウンロードフォルダに client_secret_*.json が見つかりません")
         if not _yesno("  もう一度確認しますか？", True):
@@ -279,6 +342,26 @@ def _step_init_sheets() -> None:
     print("  ✓ 初期化完了")
 
 
+def _guided_anthropic_key_creation() -> None:
+    """Anthropic Console を開き、API キー作成手順を案内する。"""
+    print()
+    _line("─")
+    print("  Anthropic API キーを作成")
+    _line("─")
+    _open_url("https://console.anthropic.com/settings/keys")
+    print()
+    print("  ▼ 開いたページでやること:")
+    print("    ① 未ログインなら Google アカウント等でログイン")
+    print("       (初回はクレジットカード登録 → クレジットチャージが必要)")
+    print("    ② 「Create Key」ボタンをクリック")
+    print("    ③ キーの名前: 好きな名前(例: review-bot)")
+    print("    ④ 表示された『sk-ant-...』で始まるキーを必ずコピー")
+    print("       ※ このキーは作成時しか表示されません。必ずコピーしてください")
+    print()
+    print("  キーをコピーできたら、次でスプレッドシートに貼り付けます。")
+    input("  ENTER を押して次へ...")
+
+
 def _step_fill_config_in_sheet() -> None:
     """ユーザーに設定シートを開いてもらい、4 項目を入力してもらう。"""
     sys.path.insert(0, str(PROJECT_DIR))
@@ -288,20 +371,26 @@ def _step_fill_config_in_sheet() -> None:
         CONFIG_KEY_INDUSTRY,
         CONFIG_KEY_WEBSITE_URL,
         CONFIG_KEY_ANTHROPIC_KEY,
+        CONFIG_KEY_CLOSING_PHRASE,
         REQUIRED_CONFIG_KEYS,
     )
 
+    # 先に Anthropic API キー取得をガイド (既に持っている場合はスキップ)
+    if not _yesno("Anthropic API キーは既にお持ちですか？", False):
+        _guided_anthropic_key_creation()
+
     url = get_config_sheet_url()
     print()
-    print("  スプレッドシートの『設定』タブを開きます。以下の 4 項目を入力してください:")
+    print("  スプレッドシートの『設定』タブを開きます。以下の項目を入力してください:")
     print()
-    print(f"    • {CONFIG_KEY_BUSINESS_NAME}")
-    print(f"    • {CONFIG_KEY_INDUSTRY}")
-    print(f"    • {CONFIG_KEY_WEBSITE_URL}（無い場合は空欄でも可）")
-    print(f"    • {CONFIG_KEY_ANTHROPIC_KEY}（sk-ant-... で始まる文字列）")
-    print()
-    print("  Anthropic APIキーがまだ無い場合は以下から取得:")
-    print("    https://console.anthropic.com/settings/keys")
+    print(f"  【必須】")
+    print(f"    • {CONFIG_KEY_BUSINESS_NAME}     例: 株式会社サンプル")
+    print(f"    • {CONFIG_KEY_INDUSTRY}         例: 飲食店、美容室、自動車販売")
+    print(f"    • {CONFIG_KEY_ANTHROPIC_KEY}  先ほどコピーした『sk-ant-...』のキー")
+    print(f"  【任意】")
+    print(f"    • {CONFIG_KEY_WEBSITE_URL}  例: https://example.com")
+    print(f"    • {CONFIG_KEY_CLOSING_PHRASE}      例: またのご来店を心よりお待ちしております。")
+    print(f"                  ※ 入力すると、全ての返信の末尾にこの定型文が必ず付加されます")
     print()
     if _yesno("  スプレッドシートを開きますか？", True):
         _open_url(url)

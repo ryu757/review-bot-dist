@@ -10,6 +10,7 @@ from config import (
     CONFIG_KEY_REGION,
     CONFIG_KEY_WEBSITE_URL,
     CONFIG_KEY_PRIORITY_KEYWORDS,
+    CONFIG_KEY_CLOSING_PHRASE,
     COL_REVIEW_DATE,
     COL_REVIEWER,
 )
@@ -47,6 +48,7 @@ def sync_new_reviews_to_sheet() -> int:
     region = config.get(CONFIG_KEY_REGION, "")
     website_url = config.get(CONFIG_KEY_WEBSITE_URL, "")
     priority_keywords = config.get(CONFIG_KEY_PRIORITY_KEYWORDS, "")
+    closing_phrase = config.get(CONFIG_KEY_CLOSING_PHRASE, "")
 
     if not business_name or not industry:
         print("⚠ スプレッドシートの「設定」シートに 企業名 / 業界 を記入してください。")
@@ -85,6 +87,7 @@ def sync_new_reviews_to_sheet() -> int:
             priority_keywords=priority_keywords,
             seo_suggestions=seo_suggestions,
             past_replies=past_replies,
+            closing_phrase=closing_phrase,
         )
 
         review_date = review.get("review_date") or datetime.now().strftime("%Y-%m-%d %H:%M")

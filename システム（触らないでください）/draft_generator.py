@@ -19,6 +19,7 @@ def generate_draft(
     priority_keywords: str = "",
     seo_suggestions: list[str] | None = None,
     past_replies: list[dict] | None = None,
+    closing_phrase: str = "",
 ) -> str:
     """レビューに対する日本語の返信下書きを生成。
 
@@ -86,6 +87,24 @@ def generate_draft(
             + "\n\n".join(examples_lines) + "\n"
         )
 
+    # 固定文末セクション（指定があれば AI には締めを書かせず、後で必ず付加する）
+    closing_section = ""
+    if closing_phrase:
+        closing_section = (
+            "\n## 末尾に自動付加される固定文末（重要）\n"
+            "あなたが書いた本文の直後に、システムが下記の文章を改行を挟んで**必ずそのまま付加**します:\n"
+            "```\n"
+            f"{closing_phrase}\n"
+            "```\n"
+            "そのため、以下を**厳守**してください:\n"
+            "- 本文の最後に「またのご来店をお待ちしております」「○○店一同」など、締めの挨拶や署名は**書かない**\n"
+            "- 上記固定文末に含まれる**店名・サロン名・スタッフ表記・地域名・呼びかけ**などを、本文の末尾2文以内で**重複させない**\n"
+            "  （例: 固定文末に「○○店スタッフより」とあるなら、本文末尾で「○○店一同」「スタッフ一同」と書かない）\n"
+            "- 本文の最後の一文が、上記固定文末に**自然に繋がる流れ**になるようにする\n"
+            "  （感謝・共感・改善姿勢の文 → 固定文末、という流れが理想）\n"
+            "- 本文と固定文末を続けて読んだときに、トーン・文体・敬語レベルが**揃って読める**ようにする\n"
+        )
+
     try:
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         r_int = int(rating) if rating.isdigit() else 3
@@ -97,7 +116,8 @@ def generate_draft(
             f"{website_section}"
             f"{region_section}"
             f"{seo_section}"
-            f"{examples_section}\n"
+            f"{examples_section}"
+            f"{closing_section}\n"
             f"## 返信対象レビュー\n"
             f"レビュアー: {reviewer}\n"
             f"評価: {stars}（{rating}/5）\n"
@@ -125,19 +145,30 @@ def generate_draft(
             max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
         )
-        return msg.content[0].text.strip()
+        body_text = msg.content[0].text.strip()
+        return _append_closing(body_text, closing_phrase)
 
     except Exception as e:
         print(f"  AI生成失敗（フォールバック使用）: {e}")
         r_int = int(rating) if rating.isdigit() else 3
         if r_int >= 4:
-            return (
+            fallback = (
                 "この度はご利用いただき、また素敵なレビューを頂戴し誠にありがとうございます。"
                 "お客様にご満足いただけたこと、心より嬉しく思います。"
-                "またのご利用を心よりお待ちしております。"
             )
-        return (
+            if not closing_phrase:
+                fallback += "またのご利用を心よりお待ちしております。"
+            return _append_closing(fallback, closing_phrase)
+        fallback = (
             "この度はご利用いただき、貴重なご意見をいただきありがとうございます。"
             "ご期待に沿えず申し訳ございませんでした。"
             "いただいたご意見をもとにサービスの改善に努めてまいります。"
         )
+        return _append_closing(fallback, closing_phrase)
+
+
+def _append_closing(body: str, closing_phrase: str) -> str:
+    """本文の末尾に固定文末を改行つきで付加する。指定が無ければそのまま返す。"""
+    if not closing_phrase:
+        return body
+    return f"{body.rstrip()}\n\n{closing_phrase.strip()}"
