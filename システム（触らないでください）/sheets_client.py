@@ -140,10 +140,13 @@ def ensure_sheet_ready():
             },
         ).execute()
 
-    # 設定シートの初期化（既存値があれば一切上書き・追加しない）
+    # 設定シートの初期化 / スキーマ自動同期
+    #   - 完全に空 → ヘッダー + DEFAULT_CONFIG_ROWS で初期化
+    #   - 既に値あり → 既存値は一切上書きせず、DEFAULT_CONFIG_ROWS にあって
+    #                 シートに無い項目だけ末尾に追記する（前方互換マイグレーション）
     existing = _get_sheets_service().spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"'{CONFIG_SHEET_NAME}'!A1:B20",
+        range=f"'{CONFIG_SHEET_NAME}'!A1:B50",
     ).execute().get("values", [])
     if not existing:
         _get_sheets_service().spreadsheets().values().update(
@@ -152,6 +155,23 @@ def ensure_sheet_ready():
             valueInputOption="USER_ENTERED",
             body={"values": [CONFIG_HEADERS] + DEFAULT_CONFIG_ROWS},
         ).execute()
+    else:
+        existing_keys = set()
+        for r in existing[1:]:  # ヘッダーをスキップ
+            if r and len(r) >= 1 and r[0]:
+                existing_keys.add(r[0].strip())
+        missing_rows = [r for r in DEFAULT_CONFIG_ROWS if r[0] not in existing_keys]
+        if missing_rows:
+            _get_sheets_service().spreadsheets().values().append(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"'{CONFIG_SHEET_NAME}'!A1",
+                valueInputOption="USER_ENTERED",
+                insertDataOption="INSERT_ROWS",
+                body={"values": missing_rows},
+            ).execute()
+            # 設定キャッシュを無効化（次回 get_business_config で再読込）
+            global _CACHED_CONFIG
+            _CACHED_CONFIG = None
 
 
 def get_business_config() -> dict:
@@ -300,6 +320,22 @@ def get_pending_rows_for_display() -> list[dict]:
             "status": status,
         })
     return out
+
+
+def update_draft_cell(row_index_1based: int, draft: str) -> None:
+    """指定行の『返信下書き』列のみを更新する（regenerate コマンド用）。"""
+    if not SPREADSHEET_ID:
+        return
+    header = get_all_rows()[0]
+    col_idx = header.index(COL_DRAFT_REPLY)
+    col = _column_letter(col_idx)
+    cell = f"'{SHEET_NAME}'!{col}{row_index_1based}"
+    _get_sheets_service().spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=cell,
+        valueInputOption="USER_ENTERED",
+        body={"values": [[draft]]},
+    ).execute()
 
 
 def update_review_date(row_index_1based: int, review_date: str) -> None:
